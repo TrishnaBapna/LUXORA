@@ -1,0 +1,17 @@
+# Python / FastAPI backend (once added)
+__pycache__/
+*.pyc
+.env
+venv/
+env/
+
+# Node / React frontend (once added)
+node_modules/
+dist/
+build/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json

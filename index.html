@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LUXORA — Guest Service &amp; Staff Coordination</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+  :root{
+    --ink:#10222B; --ink2:#16323D; --gold:#C79A45; --goldSoft:#E7CB86;
+    --teal:#2F6F6B; --brick:#B23A34; --amber:#C4863A;
+    --ivory:#F6F3EC; --paper:#FCFAF5; --text:#1B2B31; --muted:#6B7A80; --line:#E4DFD1;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:'Inter',sans-serif; color:var(--text); background:var(--ivory); }
+  .display{ font-family:'Fraunces',serif; }
+  .mono{ font-family:'IBM Plex Mono',monospace; }
+  button{ font-family:inherit; cursor:pointer; border:none; background:none; }
+  input,textarea,select{ font-family:inherit; }
+  .btn{ transition:transform .12s ease, opacity .12s ease; }
+  .btn:active{ transform:translateY(1px) scale(.98); }
+  .card{ background:var(--paper); border:1px solid var(--line); border-radius:14px; }
+  ::-webkit-scrollbar{ width:6px; } ::-webkit-scrollbar-thumb{ background:var(--line); border-radius:6px; }
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.4} }
+  .pulse{ animation:pulse 1.5s ease-in-out infinite; }
+  @keyframes rise{ from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:translateY(0)} }
+  .rise{ animation:rise .3s ease both; }
+  a{ text-decoration:none; color:inherit; }
+
+  .badge{ display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600; padding:3px 9px; border-radius:999px; }
+
+  .modal-overlay{ position:fixed; inset:0; background:rgba(16,34,43,.55); backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center; z-index:60; padding:16px; }
+  .modal-box{ width:380px; max-width:100%; padding:22px; }
+
+  .topbar{ background:var(--ink); color:#fff; padding:12px 22px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:20; }
+  .iconbtn{ display:flex; align-items:center; gap:6px; background:rgba(255,255,255,.08); color:var(--goldSoft); border:1px solid rgba(255,255,255,.15); border-radius:10px; padding:8px 12px; font-size:13px; font-weight:600; }
+
+  .quick-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr)); gap:8px; }
+  .quick-chip{ display:flex; align-items:center; gap:7px; padding:9px 10px; border-radius:10px; text-align:left; background:var(--ivory); border:1px solid var(--line); font-size:12.5px; font-weight:600; }
+  .quick-chip.sel{ background:var(--goldSoft); border-color:var(--gold); }
+
+  .stat-card{ padding:14px 16px; flex:1; min-width:110px; }
+  .stat-val{ font-size:24px; font-weight:700; font-family:'IBM Plex Mono',monospace; }
+  .stat-label{ font-size:11.5px; color:var(--muted); margin-top:2px; }
+
+  .food-row{ padding:12px; display:flex; align-items:center; gap:12px; }
+  .qty-btn{ width:26px; height:26px; border-radius:8px; font-weight:700; }
+
+  input.field, textarea.field{ padding:11px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.15); background:rgba(0,0,0,.2); color:#fff; font-size:13px; outline:none; width:100%; }
+  select.sel-field{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line); font-size:13.5px; background:var(--paper); color:var(--text); }
+  textarea.desc-field{ width:100%; border-radius:10px; border:1px solid var(--line); padding:12px; font-size:14px; resize:none; }
+
+  .toast{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--ink); color:#fff; padding:10px 18px; border-radius:10px; font-size:13px; font-weight:600; z-index:80; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ============================= DOMAIN DATA ============================= */
+const DEPARTMENTS = [
+  { id:"housekeeping", name:"Housekeeping", icon:"🧹" },
+  { id:"maintenance", name:"Maintenance", icon:"🔧" },
+  { id:"roomservice", name:"Room Service", icon:"🍽️" },
+  { id:"transportation", name:"Transportation", icon:"🚕" },
+  { id:"laundry", name:"Laundry", icon:"🧺" },
+  { id:"restaurant", name:"Restaurant", icon:"🍷" },
+  { id:"amenities", name:"Amenities", icon:"🏖️" },
+  { id:"concierge", name:"Concierge", icon:"🛎️" },
+];
+const LOCATIONS = ["Garden","Pool","Gym","Lobby","Spa","Restaurant","Other"];
+const SLA_MINUTES = { Critical:5, High:15, Normal:30, Low:60 };
+const PRIORITY_STYLE = {
+  Critical:{ color:"var(--brick)", label:"🔴 Critical" },
+  High:{ color:"var(--amber)", label:"🟠 High" },
+  Normal:{ color:"var(--teal)", label:"🟡 Normal" },
+  Low:{ color:"#8A9A6E", label:"🟢 Low" },
+};
+const WIFI = {
+  Room:{ ssid:"LUXORA_InRoom", pass:"stay-2026" }, Garden:{ ssid:"LUXORA_Garden", pass:"bloom-2026" },
+  Pool:{ ssid:"LUXORA_Pool", pass:"splash-2026" }, Gym:{ ssid:"LUXORA_Gym", pass:"flex-2026" },
+  Lobby:{ ssid:"LUXORA_Lobby", pass:"welcome-2026" }, Spa:{ ssid:"LUXORA_Spa", pass:"calm-2026" },
+  Restaurant:{ ssid:"LUXORA_Dine", pass:"savor-2026" }, Other:{ ssid:"LUXORA_Guest", pass:"guest-2026" },
+};
+const EMERGENCY = [
+  { label:"Lifeguard / Water Rescue", number:"912", tag:"IH" },
+  { label:"Reception (24hr)", number:"0", tag:"IH" },
+  { label:"Hotel Security", number:"911", tag:"IH" },
+  { label:"Police", number:"100", tag:"Nat'l" },
+  { label:"Ambulance", number:"108", tag:"Nat'l" },
+  { label:"Fire", number:"101", tag:"Nat'l" },
+];
+const QUICK_REQUESTS = [
+  { label:"🌊 Water emergency / drowning", icon:"🚨", text:"URGENT: possible drowning / person in danger in the water near the resort.", dept:"amenities", priority:"Critical", emergency:true },
+  { label:"AC not working", icon:"❄️", text:"My AC isn't working and the room is hot.", dept:"maintenance", priority:"High" },
+  { label:"Room cleaning", icon:"🧹", text:"Please clean my room.", dept:"housekeeping", priority:"Normal" },
+  { label:"Extra towels", icon:"🧻", text:"Please send extra towels to my room.", dept:"housekeeping", priority:"Normal" },
+  { label:"Extra pillow", icon:"🛏️", text:"I need an extra pillow, please.", dept:"housekeeping", priority:"Low" },
+  { label:"Light / bulb issue", icon:"💡", text:"A light bulb in my room isn't working.", dept:"maintenance", priority:"Normal" },
+  { label:"Water leak", icon:"🚰", text:"There is a water leak in my bathroom.", dept:"maintenance", priority:"High" },
+  { label:"Book a taxi", icon:"🚕", text:"I need a taxi booked, please.", dept:"transportation", priority:"Normal" },
+  { label:"Airport drop", icon:"✈️", text:"I need a drop to the airport.", dept:"transportation", priority:"Normal" },
+  { label:"Laundry pickup", icon:"🧺", text:"Please pick up my laundry for washing.", dept:"laundry", priority:"Normal" },
+  { label:"Pool towel", icon:"🏖️", text:"I need a pool towel, please.", dept:"amenities", priority:"Low" },
+  { label:"Table reservation", icon:"🍷", text:"I would like to reserve a table for dinner.", dept:"restaurant", priority:"Normal" },
+  { label:"Wake-up call", icon:"⏰", text:"Please set a wake-up call for tomorrow morning.", dept:"housekeeping", priority:"Low" },
+  { label:"Babysitting", icon:"🧸", text:"I need babysitting service arranged for my child.", dept:"concierge", priority:"Normal" },
+  { label:"Car rental", icon:"🚗", text:"I would like to rent a car during my stay.", dept:"concierge", priority:"Normal" },
+  { label:"Valet parking", icon:"🅿️", text:"Please have my car valet parked.", dept:"concierge", priority:"Normal" },
+];
+const MENU = [
+  { id:"f1", name:"Club Sandwich", category:"Starters", price:350, desc:"Triple-decker, fries on the side." },
+  { id:"f2", name:"Soup of the Day", category:"Starters", price:220, desc:"Ask your server for today's flavour." },
+  { id:"f3", name:"Caesar Salad", category:"Starters", price:280, desc:"Romaine, parmesan, garlic croutons." },
+  { id:"f4", name:"Butter Chicken", category:"Mains", price:450, desc:"Served with garlic naan." },
+  { id:"f5", name:"Margherita Pizza", category:"Mains", price:400, desc:"Wood-fired, fresh basil." },
+  { id:"f6", name:"Grilled Salmon", category:"Mains", price:620, desc:"Lemon butter, seasonal veg." },
+  { id:"f7", name:"Veg Biryani", category:"Mains", price:380, desc:"Basmati rice, raita on the side." },
+  { id:"f8", name:"Masala Chai", category:"Beverages", price:120, desc:"Freshly brewed, spiced." },
+  { id:"f9", name:"Fresh Juice", category:"Beverages", price:150, desc:"Ask for today's fruit selection." },
+  { id:"f10", name:"Sparkling Water", category:"Beverages", price:100, desc:"500ml." },
+  { id:"f11", name:"Chocolate Brownie", category:"Desserts", price:200, desc:"Served warm, vanilla ice cream." },
+  { id:"f12", name:"Ice Cream (2 scoops)", category:"Desserts", price:180, desc:"Ask for today's flavours." },
+];
+const CLASSIFY_RULES = [
+  { dept:"maintenance", words:["ac","air condition","light","bulb","leak","plumbing","tv","electrical","shower","tap","not working","broken","fix","power","socket"] },
+  { dept:"housekeeping", words:["clean","towel","sheets","trash","tidy","vacuum","housekeeping","bin","dust"] },
+  { dept:"roomservice", words:["food","hungry","breakfast","order","meal","coffee","drink","snack","room service"] },
+  { dept:"transportation", words:["taxi","cab","airport","car","pickup","drop","shuttle","ride"] },
+  { dept:"laundry", words:["laundry","iron","dry clean","wash clothes","pressing"] },
+  { dept:"restaurant", words:["reservation","table","dinner","restaurant","booking a table"] },
+  { dept:"amenities", words:["pool towel","gym","spa","extra pillow","extra bed","amenity","umbrella","sunbed","drowning","water emergency","lifeguard","rip current","man overboard"] },
+  { dept:"concierge", words:["babysit","babysitter","child care","childcare","nanny","car rental","rent a car","hire a car","valet","park my car","parking"] },
+];
+const CRITICAL_WORDS = ["smoke","fire","gas leak","emergency","flood","injury","chest pain","can't breathe","cant breathe","bleeding","drowning","man overboard","not breathing","rip current"];
+const HIGH_WORDS = ["not working","broken","leak","overflow","stuck","locked out","no power","urgent"];
+const LOW_WORDS = ["information","question","wondering","when is","what time"];
+
+function classify(text){
+  const t = text.toLowerCase();
+  let deptId = "housekeeping", hit = false;
+  for (const rule of CLASSIFY_RULES){
+    if (rule.words.some(w => t.includes(w))){ deptId = rule.dept; hit = true; break; }
+  }
+  let priority = "Normal", reason = "Standard request, no urgency markers detected.";
+  if (CRITICAL_WORDS.some(w => t.includes(w))){ priority = "Critical"; reason = "Safety-related keywords detected — treated as critical."; }
+  else if (HIGH_WORDS.some(w => t.includes(w))){ priority = "High"; reason = "Malfunction / urgency language detected."; }
+  else if (LOW_WORDS.some(w => t.includes(w))){ priority = "Low"; reason = "Informational request, no active issue."; }
+  else if (!hit){ reason = "No strong category signal — routed to Housekeeping by default."; }
+  return { department: DEPARTMENTS.find(d => d.id === deptId), priority, reason };
+}
+
+const INITIAL_STAFF = [
+  { id:"st1", name:"Priya Nair", dept:"maintenance", available:true, active:0 },
+  { id:"st2", name:"Rohit Verma", dept:"maintenance", available:true, active:1 },
+  { id:"st3", name:"Anjali Rao", dept:"housekeeping", available:true, active:0 },
+  { id:"st4", name:"Arjun Mehta", dept:"transportation", available:true, active:0 },
+  { id:"st5", name:"Sana Iqbal", dept:"roomservice", available:true, active:0 },
+  { id:"st6", name:"Karan Shah", dept:"laundry", available:true, active:0 },
+  { id:"st7", name:"Divya Menon", dept:"restaurant", available:true, active:0 },
+  { id:"st8", name:"Farhan Ali", dept:"amenities", available:true, active:0 },
+  { id:"st9", name:"Neha Kulkarni", dept:"concierge", available:true, active:0 },
+];
+const INITIAL_USERS = [
+  { id:"u_guest", role:"guest", name:"Meera Kapoor", email:"guest@luxora.com", password:"guest123", room:"204" },
+  { id:"u_staff1", role:"staff", name:"Priya Nair", email:"priya@luxora.com", password:"staff123", staffId:"st1" },
+  { id:"u_staff2", role:"staff", name:"Arjun Mehta", email:"arjun@luxora.com", password:"staff123", staffId:"st4" },
+  { id:"u_staff3", role:"staff", name:"Neha Kulkarni", email:"neha@luxora.com", password:"staff123", staffId:"st9" },
+  { id:"u_supv", role:"supervisor", name:"Devika Iyer", email:"admin@luxora.com", password:"super123" },
+];
+
+/* ============================= STATE ============================= */
+let S = {
+  users: INITIAL_USERS.map(u => ({...u})),
+  staff: INITIAL_STAFF.map(s => ({...s})),
+  requests: [],
+  reqCounter: 1,
+  currentUser: null,
+  ui: {
+    authRole:"guest", authMode:"login", authError:"",
+    guestTab:"help", locMode:"room", area:"Garden",
+    pendingIndex:null, customMode:false,
+    showEmergency:false, showWifi:false, wifiLocation:"Room",
+    feedbackReqId:null, cart:{}, toast:null,
+  },
+};
+
+function esc(str){
+  return String(str).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function showToast(msg){
+  S.ui.toast = msg; render();
+  setTimeout(() => { S.ui.toast = null; const t = document.getElementById("toastBox"); if (t) t.remove(); }, 1800);
+}
+
+/* ============================= AUTH ============================= */
+function setAuthRole(r){ S.ui.authRole = r; S.ui.authMode = "login"; S.ui.authError = ""; render(); }
+function toggleAuthMode(){ S.ui.authMode = S.ui.authMode === "login" ? "signup" : "login"; S.ui.authError = ""; render(); }
+
+function doLogin(e){
+  e.preventDefault();
+  const email = document.getElementById("loginEmail").value.trim().toLowerCase();
+  const pass = document.getElementById("loginPassword").value;
+  const u = S.users.find(x => x.email.toLowerCase() === email && x.password === pass);
+  if (!u){ S.ui.authError = "No account matches that email and password."; render(); return; }
+  loginAs(u);
+}
+function doSignup(e){
+  e.preventDefault();
+  const name = document.getElementById("suName").value.trim();
+  const email = document.getElementById("suEmail").value.trim();
+  const pass = document.getElementById("suPassword").value;
+  const room = document.getElementById("suRoom").value.trim();
+  if (!name || !email || !pass || !room){ S.ui.authError = "Fill in all fields."; render(); return; }
+  if (S.users.some(u => u.email.toLowerCase() === email.toLowerCase())){ S.ui.authError = "That email is already registered."; render(); return; }
+  const u = { id:"u_"+Date.now(), role:"guest", name, email, password:pass, room };
+  S.users.push(u);
+  loginAs(u);
+}
+function demoLogin(role){
+  const map = { guest:"guest@luxora.com", staff:"priya@luxora.com", supervisor:"admin@luxora.com" };
+  const u = S.users.find(x => x.email === map[role]);
+  if (u) loginAs(u);
+}
+function loginAs(u){
+  S.currentUser = u;
+  S.ui.authError = ""; S.ui.guestTab = "help"; S.ui.locMode = "room"; S.ui.customMode = false;
+  S.ui.pendingIndex = null; S.ui.cart = {}; S.ui.wifiLocation = "Room";
+  render();
+}
+function logout(){ S.currentUser = null; render(); }
+
+/* ============================= GUEST ACTIONS ============================= */
+function setGuestTab(t){ S.ui.guestTab = t; render(); }
+function setLocMode(m){ S.ui.locMode = m; S.ui.wifiLocation = m === "room" ? "Room" : S.ui.area; render(); }
+function setArea(val){ S.ui.area = val; S.ui.wifiLocation = val; }
+function pickQuick(i){ S.ui.pendingIndex = i; S.ui.customMode = false; render(); }
+function enableCustom(){ S.ui.customMode = true; S.ui.pendingIndex = null; render(); setTimeout(() => document.getElementById("customDesc")?.focus(), 30); }
+function updateCustomPreview(){
+  const val = document.getElementById("customDesc").value;
+  const box = document.getElementById("customPreview");
+  if (!box) return;
+  if (val.trim().length > 3){
+    const p = classify(val);
+    box.innerHTML = previewBadges(p.department, p.priority);
+  } else box.innerHTML = "";
+}
+function previewBadges(dept, priority){
+  return `<div class="rise" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+    <span class="badge" style="color:var(--ink);background:var(--ivory);">${dept.icon} ${dept.name}</span>
+    <span class="badge" style="color:#fff;background:${PRIORITY_STYLE[priority].color};">${PRIORITY_STYLE[priority].label}</span>
+    <span class="badge" style="color:var(--muted);background:var(--ivory);">~${SLA_MINUTES[priority]} min target</span>
+  </div>`;
+}
+function currentLocation(){
+  return S.ui.locMode === "room" ? `Room ${S.currentUser.room}` : S.ui.area;
+}
+function submitRequestForm(){
+  let text, department, priority, reason, emergency = false;
+  if (S.ui.customMode){
+    text = document.getElementById("customDesc").value.trim();
+    if (!text) return;
+    const c = classify(text); department = c.department; priority = c.priority; reason = c.reason;
+    emergency = priority === "Critical" && /drown|water emergency|man overboard|rip current|not breathing/i.test(text);
+  } else if (S.ui.pendingIndex !== null){
+    const q = QUICK_REQUESTS[S.ui.pendingIndex];
+    text = q.text; department = DEPARTMENTS.find(d => d.id === q.dept); priority = q.priority;
+    reason = "Selected directly by guest."; emergency = !!q.emergency;
+  } else return;
+  createRequest(text, currentLocation(), department, priority, reason, emergency);
+  S.ui.pendingIndex = null; S.ui.customMode = false;
+  if (emergency){
+    showToast("🚨 Emergency alert sent — also call for help directly, now");
+    openEmergency();
+  } else {
+    showToast("Request sent — " + department.name);
+  }
+}
+function changeQty(id, delta){
+  S.ui.cart[id] = Math.max(0, (S.ui.cart[id] || 0) + delta);
+  if (S.ui.cart[id] === 0) delete S.ui.cart[id];
+  render();
+}
+function cartItems(){
+  return Object.entries(S.ui.cart).map(([id, qty]) => ({ item: MENU.find(m => m.id === id), qty }));
+}
+function cartTotal(){ return cartItems().reduce((s,c) => s + c.item.price * c.qty, 0); }
+function placeFoodOrder(){
+  const items = cartItems();
+  if (items.length === 0) return;
+  const note = document.getElementById("foodNote")?.value.trim();
+  const summary = items.map(c => `${c.qty}x ${c.item.name}`).join(", ");
+  const desc = `Room service order: ${summary}${note ? " — Note: " + note : ""} (Total ₹${cartTotal()})`;
+  createRequest(desc, `Room ${S.currentUser.room}`, DEPARTMENTS.find(d => d.id === "roomservice"), "Normal", "Food order placed via menu.");
+  S.ui.cart = {};
+  showToast("Order placed to Room " + S.currentUser.room + "!");
+}
+
+function createRequest(description, location, department, priority, reason, emergency){
+  const minutes = SLA_MINUTES[priority];
+  const createdAt = Date.now();
+  const deadlineAt = createdAt + minutes * 60000;
+  const pool = S.staff.filter(s => s.dept === department.id);
+  const available = pool.filter(s => s.available);
+  const chosen = [...(available.length ? available : pool)].sort((a,b) => a.active - b.active)[0];
+  const req = {
+    id: "r_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),
+    num: S.reqCounter++, guestId: S.currentUser.id, description, location,
+    department, priority, reason, createdAt, deadlineAt, deadlineTotal: minutes*60000,
+    status: "Assigned", staffId: chosen ? chosen.id : null, staffName: chosen ? chosen.name : "Unassigned",
+    rating: null, comment: "", emergency: !!emergency,
+  };
+  S.requests.push(req);
+  if (chosen) chosen.active += 1;
+  render();
+}
+
+/* ============================= STAFF / FEEDBACK ACTIONS ============================= */
+function reassignRequest(reqId, newStaffId){
+  const r = S.requests.find(x => x.id === reqId); if (!r) return;
+  const newStaff = S.staff.find(s => s.id === newStaffId); if (!newStaff || newStaff.id === r.staffId) return;
+  const oldStaff = S.staff.find(s => s.id === r.staffId);
+  if (oldStaff) oldStaff.active = Math.max(0, oldStaff.active - 1);
+  newStaff.active += 1;
+  r.staffId = newStaff.id; r.staffName = newStaff.name;
+  showToast(`Reassigned #${r.num} to ${newStaff.name}`);
+  render();
+}
+function startRequest(id){ const r = S.requests.find(x => x.id === id); if (r) r.status = "In Progress"; render(); }
+function completeRequest(id){
+  const r = S.requests.find(x => x.id === id); if (!r) return;
+  r.status = "Completed"; r.completedAt = Date.now();
+  const s = S.staff.find(x => x.id === r.staffId); if (s) s.active = Math.max(0, s.active - 1);
+  render();
+}
+function openFeedback(id){ S.ui.feedbackReqId = id; S.ui.feedbackStars = 5; render(); }
+function closeFeedback(){ S.ui.feedbackReqId = null; render(); }
+function setStars(n){ S.ui.feedbackStars = n; render(); }
+function submitFeedback(){
+  const r = S.requests.find(x => x.id === S.ui.feedbackReqId); if (!r) return;
+  r.rating = S.ui.feedbackStars || 5;
+  r.comment = document.getElementById("fbComment")?.value.trim() || "";
+  S.ui.feedbackReqId = null; render();
+}
+function openChat(){
+  S.ui.showChat = true;
+  if (!S.ui.chatMessages) S.ui.chatMessages = [{ from:"bot", text:"Hi! I'm the LUXORA assistant 👋 Tell me what you need and I'll route it to the right team — try \"my AC isn't working\" or \"book a taxi to the airport\"." }];
+  render();
+  setTimeout(() => { const el = document.getElementById("chatInput"); if (el) el.focus(); scrollChatToBottom(); }, 30);
+}
+function closeChat(){ S.ui.showChat = false; render(); }
+function scrollChatToBottom(){ const b = document.getElementById("chatBody"); if (b) b.scrollTop = b.scrollHeight; }
+function sendChatMessage(){
+  const input = document.getElementById("chatInput");
+  const val = input.value.trim();
+  if (!val) return;
+  S.ui.chatMessages.push({ from:"user", text:val });
+  if (/^(hi|hello|hey|good\s?(morning|evening|afternoon))\b/i.test(val)){
+    S.ui.chatMessages.push({ from:"bot", text:"Hello! Tell me what you need help with, or which area you're in, and I'll take care of it." });
+    S.ui.pendingChat = null;
+  } else {
+    const c = classify(val);
+    S.ui.pendingChat = { text: val, department: c.department, priority: c.priority };
+    S.ui.chatMessages.push({ from:"bot", html:
+      `Got it — this looks like a <b>${c.department.icon} ${c.department.name}</b> request, priority <b>${PRIORITY_STYLE[c.priority].label}</b> (~${SLA_MINUTES[c.priority]} min target) at <b>${esc(currentLocation())}</b>.<br/>` +
+      `<button class="btn" onclick="confirmChatRequest()" style="margin-top:8px;background:var(--gold);color:var(--ink);padding:6px 12px;border-radius:8px;font-size:12px;font-weight:700;">✅ Confirm &amp; Send</button>` });
+  }
+  render();
+  setTimeout(() => { const el = document.getElementById("chatInput"); if (el) el.focus(); scrollChatToBottom(); }, 30);
+}
+function confirmChatRequest(){
+  const p = S.ui.pendingChat; if (!p) return;
+  createRequest(p.text, currentLocation(), p.department, p.priority, "Submitted via AI chat assistant.");
+  S.ui.chatMessages.push({ from:"bot", text:`✅ Sent to ${p.department.name} — request #${S.reqCounter-1}. You can track it on your dashboard.` });
+  S.ui.pendingChat = null;
+  render();
+  setTimeout(scrollChatToBottom, 30);
+}
+function openEmergency(){ S.ui.showEmergency = true; render(); }
+function closeEmergency(){ S.ui.showEmergency = false; render(); }
+function openWifi(){ S.ui.showWifi = true; render(); }
+function closeWifi(){ S.ui.showWifi = false; render(); }
+function copyWifi(pass){
+  navigator.clipboard?.writeText(pass);
+  const b = document.getElementById("wifiCopyBtn"); if (b){ b.textContent = "Copied ✓"; setTimeout(() => b.textContent = "Copy", 1200); }
+}
+
+/* ============================= RENDER: SLA RING ============================= */
+function slaDyn(r, now){
+  const remain = r.deadlineAt - now;
+  const pct = Math.max(0, Math.min(1, remain / r.deadlineTotal));
+  const breached = remain <= 0 && r.status !== "Completed";
+  const size = 54, stroke = size < 50 ? 10 : 11;
+  const rad = (size - 8) / 2, c = 2*Math.PI*rad;
+  const color = r.status === "Completed" ? "var(--teal)" : breached ? "var(--brick)" : pct < 0.34 ? "var(--brick)" : pct < 0.6 ? "var(--amber)" : "var(--gold)";
+  const dash = r.status === "Completed" ? c : c*(1-pct);
+  const mins = Math.max(0, Math.floor(remain/60000)), secs = Math.max(0, Math.floor((remain%60000)/1000));
+  const label = r.status === "Completed" ? "✓" : breached ? "SLA" : `${mins}:${String(secs).padStart(2,"0")}`;
+  const ring = `<div style="position:relative;width:${size}px;height:${size}px;flex-shrink:0;">
+    <svg width="${size}" height="${size}" style="transform:rotate(-90deg)">
+      <circle cx="${size/2}" cy="${size/2}" r="${rad}" stroke="var(--line)" stroke-width="5" fill="none"/>
+      <circle cx="${size/2}" cy="${size/2}" r="${rad}" stroke="${color}" stroke-width="5" fill="none"
+        stroke-dasharray="${c}" stroke-dashoffset="${dash}" stroke-linecap="round" style="transition:stroke-dashoffset .5s linear"/>
+    </svg>
+    <div class="${breached ? "pulse" : ""}" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:${color};">${label}</div>
+  </div>`;
+  const statusLabel = r.status === "Assigned" ? "🟡 Assigned" : r.status === "In Progress" ? "🟠 In Progress" : "🟢 Completed";
+  const statusColor = r.status === "Completed" ? "var(--teal)" : r.status === "In Progress" ? "var(--amber)" : "var(--muted)";
+  const breachBadge = breached ? `<span class="badge" style="color:#fff;background:var(--brick);">⚠ SLA breached</span>` : "";
+  return { ring, statusLabel, statusColor, breached, breachBadge };
+}
+
+function requestCardHTML(r, opts){
+  const { ring, statusLabel, statusColor, breached, breachBadge } = slaDyn(r, Date.now());
+  const pr = PRIORITY_STYLE[r.priority];
+  const actions = (!opts.guestView && r.status !== "Completed") ? `
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      ${r.status === "Assigned" ? `<button class="btn" onclick="startRequest('${r.id}')" style="background:var(--ink);color:#fff;padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700;">▶ Start</button>` : ""}
+      ${r.status === "In Progress" ? `<button class="btn" onclick="completeRequest('${r.id}')" style="background:var(--teal);color:#fff;padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700;">✓ Complete</button>` : ""}
+    </div>` : "";
+  return `<div class="card rise" id="dyn-${r.id}" style="padding:14px;display:flex;gap:14px;align-items:center;${(breached || r.emergency) ? "border-color:var(--brick);border-width:2px;" : ""}">
+    ${ring}
+    <div style="flex:1;min-width:0;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+        <span class="mono" style="font-size:11px;color:var(--muted);">#${r.num}</span>
+        ${r.emergency ? `<span class="badge pulse" style="color:#fff;background:var(--brick);">🚨 EMERGENCY</span>` : ""}
+        <span class="badge" style="color:#fff;background:${pr.color};">${pr.label}</span>
+        <span class="badge" style="color:var(--ink);background:var(--ivory);">${r.department.icon} ${r.department.name}</span>
+        ${breachBadge}
+      </div>
+      <div style="font-size:14px;margin-bottom:4px;">${esc(r.description)}</div>
+      <div style="font-size:12px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;">
+        <span>📍 ${esc(r.location)}</span>
+        ${!opts.guestView ? `<span>Assigned: ${esc(r.staffName || "—")}</span>` : ""}
+        <span style="font-weight:600;color:${statusColor};">${statusLabel}</span>
+      </div>
+    </div>
+    ${actions}
+  </div>`;
+}
+
+/* ============================= RENDER: LOGIN ============================= */
+function renderLogin(){
+  const role = S.ui.authRole, mode = S.ui.authMode;
+  const roleTabs = ["guest","staff","supervisor"].map(r => `
+    <button class="btn" onclick="setAuthRole('${r}')" style="flex:1;padding:8px 0;border-radius:8px;font-size:12px;font-weight:700;text-transform:capitalize;
+      background:${role===r ? "var(--gold)" : "transparent"};color:${role===r ? "var(--ink)" : "rgba(255,255,255,.6)"};">${r}</button>`).join("");
+
+  const signupFields = mode === "signup" ? `
+    <input class="field" id="suName" placeholder="Full name" />
+    <input class="field" id="suEmail" placeholder="Email" type="email" />
+    <input class="field" id="suPassword" placeholder="Password" type="password" />
+    <input class="field" id="suRoom" placeholder="Room number" />` : `
+    <input class="field" id="loginEmail" placeholder="Email" type="email" />
+    <input class="field" id="loginPassword" placeholder="Password" type="password" />`;
+
+  const formTag = mode === "signup"
+    ? `<form onsubmit="doSignup(event)" style="display:flex;flex-direction:column;gap:10px;">${signupFields}
+        ${S.ui.authError ? `<div style="color:#F0A38C;font-size:12px;">${esc(S.ui.authError)}</div>` : ""}
+        <button type="submit" class="btn" style="margin-top:6px;background:var(--gold);color:var(--ink);padding:11px 0;border-radius:10px;font-weight:700;font-size:14px;">Create account</button>
+      </form>`
+    : `<form onsubmit="doLogin(event)" style="display:flex;flex-direction:column;gap:10px;">${signupFields}
+        ${S.ui.authError ? `<div style="color:#F0A38C;font-size:12px;">${esc(S.ui.authError)}</div>` : ""}
+        <button type="submit" class="btn" style="margin-top:6px;background:var(--gold);color:var(--ink);padding:11px 0;border-radius:10px;font-weight:700;font-size:14px;">Sign in</button>
+      </form>`;
+
+  const signupToggle = role === "guest" ? `
+    <div style="text-align:center;margin-top:12px;">
+      <button class="btn" onclick="toggleAuthMode()" style="color:var(--goldSoft);font-size:12px;">
+        ${mode === "login" ? "New guest? Create an account" : "Already registered? Sign in"}
+      </button>
+    </div>` : "";
+
+  return `
+  <div style="min-height:100vh;background:radial-gradient(circle at 20% 10%, var(--ink2), var(--ink) 60%);display:flex;align-items:center;justify-content:center;padding:20px;">
+    <div class="rise" style="width:400px;max-width:100%;">
+      <div style="text-align:center;margin-bottom:26px;">
+        <div style="font-size:12px;letter-spacing:3px;color:var(--goldSoft);margin-bottom:6px;">IH · HOSPITALITY OS</div>
+        <h1 class="display" style="color:#fff;font-size:40px;margin:0;">LUXORA</h1>
+        <p style="color:rgba(255,255,255,.55);font-size:13px;margin-top:6px;">Guest service, orchestrated in real time.</p>
+      </div>
+      <div style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:24px;">
+        <div style="display:flex;gap:6px;margin-bottom:18px;background:rgba(0,0,0,.2);padding:4px;border-radius:10px;">${roleTabs}</div>
+        ${formTag}
+        ${signupToggle}
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,.1);text-align:center;">
+          <button class="btn" onclick="demoLogin('${role}')" style="color:rgba(255,255,255,.5);font-size:11.5px;">Sign in as demo ${role} →</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ============================= RENDER: GUEST PORTAL ============================= */
+function renderGuestPortal(){
+  const u = S.currentUser;
+  const my = S.requests.filter(r => r.guestId === u.id).sort((a,b) => b.createdAt - a.createdAt);
+  const active = my.filter(r => r.status !== "Completed");
+  const past = my.filter(r => r.status === "Completed");
+  const needsFeedback = past.find(r => !r.rating);
+
+  const quickChips = QUICK_REQUESTS.map((q,i) => `
+    <button class="btn quick-chip ${S.ui.pendingIndex===i ? "sel" : ""}" onclick="pickQuick(${i})"
+      style="${q.emergency ? `background:var(--brick);border-color:var(--brick);color:#fff;font-weight:700;` : ""}"><span>${q.icon}</span>${esc(q.label)}</button>`).join("");
+
+  let preview = "";
+  if (S.ui.pendingIndex !== null){
+    const q = QUICK_REQUESTS[S.ui.pendingIndex];
+    preview = previewBadges(DEPARTMENTS.find(d => d.id === q.dept), q.priority);
+  }
+
+  const helpTab = `
+    <div class="card" style="padding:20px;margin-bottom:26px;">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:14px;">✨<h3 class="display" style="margin:0;font-size:18px;">What do you need help with?</h3></div>
+      <div style="display:flex;gap:8px;margin-bottom:14px;">
+        <button class="btn" onclick="setLocMode('room')" style="flex:1;padding:9px 0;border-radius:9px;font-size:12.5px;font-weight:600;border:1px solid var(--line);
+          background:${S.ui.locMode==="room" ? "var(--ink)" : "var(--ivory)"};color:${S.ui.locMode==="room" ? "#fff" : "var(--ink)"};">📍 My Room (${esc(u.room)})</button>
+        <button class="btn" onclick="setLocMode('area')" style="flex:1;padding:9px 0;border-radius:9px;font-size:12.5px;font-weight:600;border:1px solid var(--line);
+          background:${S.ui.locMode==="area" ? "var(--ink)" : "var(--ivory)"};color:${S.ui.locMode==="area" ? "#fff" : "var(--ink)"};">🧭 Somewhere else</button>
+      </div>
+      ${S.ui.locMode==="area" ? `<select class="sel-field" style="margin-bottom:14px;" onchange="setArea(this.value)">
+        ${LOCATIONS.map(l => `<option value="${l}" ${S.ui.area===l ? "selected" : ""}>${l}</option>`).join("")}
+      </select>` : ""}
+      <div style="font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:8px;">Tap what you need — no typing required</div>
+      <div class="quick-grid" style="margin-bottom:14px;">${quickChips}</div>
+      ${!S.ui.customMode ? `<button class="btn" onclick="enableCustom()" style="color:var(--teal);font-size:12.5px;font-weight:700;margin-bottom:10px;">✏️ None of these — describe it myself</button>` : ""}
+      ${S.ui.customMode ? `<textarea class="desc-field" id="customDesc" rows="3" placeholder="Describe what you need…" oninput="updateCustomPreview()"></textarea><div id="customPreview"></div>` : ""}
+      ${!S.ui.customMode && S.ui.pendingIndex !== null ? preview : ""}
+      <button class="btn" onclick="submitRequestForm()" style="margin-top:14px;width:100%;background:var(--gold);color:var(--ink);padding:12px 0;border-radius:10px;font-weight:700;font-size:14px;">📨 Submit Request</button>
+    </div>`;
+
+  const foodItems = ["Starters","Mains","Beverages","Desserts"].map(cat => `
+    <div style="margin-bottom:18px;">
+      <h4 class="display" style="font-size:15px;margin:0 0 8px;color:var(--muted);">${cat}</h4>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${MENU.filter(m => m.category===cat).map(m => `
+          <div class="card food-row">
+            <div style="flex:1;">
+              <div style="font-weight:700;font-size:14px;">${esc(m.name)}</div>
+              <div style="font-size:12px;color:var(--muted);">${esc(m.desc)}</div>
+              <div class="mono" style="font-size:12.5px;color:var(--gold);margin-top:3px;font-weight:700;">₹${m.price}</div>
+            </div>
+            ${!S.ui.cart[m.id] ? `<button class="btn" onclick="changeQty('${m.id}',1)" style="background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;font-size:12.5px;font-weight:700;">Add</button>` :
+            `<div style="display:flex;align-items:center;gap:8px;">
+              <button class="btn qty-btn" onclick="changeQty('${m.id}',-1)" style="background:var(--ivory);border:1px solid var(--line);">−</button>
+              <span class="mono" style="font-size:13px;width:14px;text-align:center;">${S.ui.cart[m.id]}</span>
+              <button class="btn qty-btn" onclick="changeQty('${m.id}',1)" style="background:var(--ink);color:#fff;">+</button>
+            </div>`}
+          </div>`).join("")}
+      </div>
+    </div>`).join("");
+
+  const ci = cartItems();
+  const cartBox = ci.length > 0 ? `
+    <div class="card rise" style="padding:16px;position:sticky;bottom:12px;border-color:var(--gold);">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px;">Your cart</div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;">
+        ${ci.map(c => `<div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);"><span>${c.qty}× ${esc(c.item.name)}</span><span class="mono">₹${c.item.price*c.qty}</span></div>`).join("")}
+      </div>
+      <textarea class="desc-field" id="foodNote" rows="1" placeholder="Special instructions (optional)" style="margin-bottom:10px;"></textarea>
+      <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;margin-bottom:12px;border-top:1px dashed var(--line);padding-top:8px;">
+        <span>Total (Room ${esc(u.room)})</span><span class="mono">₹${cartTotal()}</span>
+      </div>
+      <button class="btn" onclick="placeFoodOrder()" style="width:100%;background:var(--gold);color:var(--ink);padding:11px 0;border-radius:10px;font-weight:700;font-size:14px;">Place Order to Room ${esc(u.room)}</button>
+    </div>` : "";
+
+  const foodTab = `<div style="margin-bottom:26px;">${foodItems}${cartBox}</div>`;
+
+  return `
+  <div style="max-width:820px;margin:0 auto;padding:26px 18px 60px;">
+    <button class="btn" onclick="openEmergency()" style="width:100%;text-align:left;display:flex;align-items:center;gap:8px;background:var(--ink);color:#fff;padding:9px 14px;border-radius:10px;font-size:12.5px;margin-bottom:18px;">
+      🚨 <b>In a real emergency, don't wait</b> — tap here for direct emergency numbers.
+    </button>
+    <div style="margin-bottom:22px;">
+      <div style="font-size:12px;color:var(--muted);">Welcome back</div>
+      <h2 class="display" style="margin:2px 0;font-size:26px;">${esc(u.name)}</h2>
+      <div style="font-size:13px;color:var(--muted);">📍 Room ${esc(u.room)}</div>
+    </div>
+    ${needsFeedback ? `
+      <div class="card rise" style="padding:14px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;border-color:var(--gold);flex-wrap:wrap;gap:8px;">
+        <div style="font-size:13px;">Your <b>${needsFeedback.department.name}</b> request was completed — how did we do?</div>
+        <button class="btn" onclick="openFeedback('${needsFeedback.id}')" style="background:var(--gold);color:var(--ink);padding:7px 14px;border-radius:8px;font-weight:700;font-size:12px;">Rate it</button>
+      </div>` : ""}
+    <div style="display:flex;gap:8px;margin-bottom:18px;background:var(--paper);border:1px solid var(--line);padding:4px;border-radius:12px;">
+      <button class="btn" onclick="setGuestTab('help')" style="flex:1;padding:9px 0;border-radius:9px;font-size:13px;font-weight:700;
+        background:${S.ui.guestTab==="help" ? "var(--ink)" : "transparent"};color:${S.ui.guestTab==="help" ? "#fff" : "var(--ink)"};">🛎️ Request Help</button>
+      <button class="btn" onclick="setGuestTab('food')" style="flex:1;padding:9px 0;border-radius:9px;font-size:13px;font-weight:700;
+        background:${S.ui.guestTab==="food" ? "var(--ink)" : "transparent"};color:${S.ui.guestTab==="food" ? "#fff" : "var(--ink)"};">🍽️ Order Food ${ci.length ? `<span style="background:var(--gold);color:var(--ink);border-radius:999px;font-size:10px;padding:1px 6px;margin-left:4px;">${ci.reduce((s,c)=>s+c.qty,0)}</span>` : ""}</button>
+    </div>
+    ${S.ui.guestTab === "help" ? helpTab : foodTab}
+    <h3 class="display" style="font-size:17px;margin-bottom:10px;">Active requests</h3>
+    ${active.length === 0 ? `<p style="color:var(--muted);font-size:13px;">Nothing active — submit a request above.</p>` : ""}
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:26px;">
+      ${active.map(r => requestCardHTML(r, { guestView:true })).join("")}
+    </div>
+    ${past.length > 0 ? `
+      <h3 class="display" style="font-size:17px;margin-bottom:10px;">History</h3>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${past.map(r => `<div class="card" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+          <span>${r.department.icon} ${esc(r.description.slice(0,44))}${r.description.length>44 ? "…" : ""}</span>
+          <span style="color:var(--muted);">${r.rating ? r.rating+"★" : `<button class="btn" onclick="openFeedback('${r.id}')" style="color:var(--gold);font-weight:700;">Rate</button>`}</span>
+        </div>`).join("")}
+      </div>` : ""}
+  </div>`;
+}
+
+/* ============================= RENDER: STAFF ============================= */
+function renderStaffDashboard(){
+  const u = S.currentUser;
+  const staff = S.staff.find(s => s.id === u.staffId);
+  const dept = DEPARTMENTS.find(d => d.id === staff.dept);
+  const mine = S.requests.filter(r => r.department.id === staff.dept || r.staffId === staff.id);
+  const open = mine.filter(r => r.status !== "Completed").sort((a,b) => (b.emergency - a.emergency) || (a.deadlineAt - b.deadlineAt));
+  const done = mine.filter(r => r.status === "Completed");
+
+  return `
+  <div style="max-width:820px;margin:0 auto;padding:26px 18px 60px;">
+    <div style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;">
+      <div>
+        <div style="font-size:12px;color:var(--muted);">${dept.icon} ${dept.name} desk</div>
+        <h2 class="display" style="margin:2px 0;font-size:26px;">${esc(u.name)}</h2>
+      </div>
+      <span class="badge" style="color:var(--teal);background:#E4EFE9;">${open.length} open task${open.length!==1?"s":""}</span>
+    </div>
+    ${open.length === 0 ? `<p style="color:var(--muted);font-size:13px;">No open requests for ${dept.name} right now.</p>` : ""}
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:26px;">
+      ${open.map(r => requestCardHTML(r, { guestView:false })).join("")}
+    </div>
+    ${done.length > 0 ? `
+      <h3 class="display" style="font-size:16px;margin-bottom:10px;">Completed (${done.length})</h3>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        ${done.slice(0,6).map(r => `<div style="font-size:12.5px;color:var(--muted);padding:6px 4px;">#${r.num} · ${esc(r.description.slice(0,50))}${r.description.length>50?"…":""} ${r.rating ? "· "+r.rating+"★" : ""}</div>`).join("")}
+      </div>` : ""}
+  </div>`;
+}
+
+/* ============================= RENDER: SUPERVISOR ============================= */
+function supervisorStatsHTML(){
+  const now = Date.now();
+  const total = S.requests.length;
+  const pending = S.requests.filter(r => r.status === "Assigned").length;
+  const inProgress = S.requests.filter(r => r.status === "In Progress").length;
+  const completed = S.requests.filter(r => r.status === "Completed").length;
+  const escalatedList = S.requests.filter(r => r.status !== "Completed" && now > r.deadlineAt);
+  const rated = S.requests.filter(r => r.rating);
+  const avgRating = rated.length ? (rated.reduce((s,r) => s+r.rating,0)/rated.length).toFixed(1) : "—";
+
+  const byDept = DEPARTMENTS.map(d => ({ d, count: S.requests.filter(r => r.department.id === d.id).length }));
+  const maxCount = Math.max(1, ...byDept.map(x => x.count));
+  const mostRequested = [...byDept].sort((a,b) => b.count - a.count).slice(0,4);
+
+  const activeEmergencies = S.requests.filter(r => r.emergency && r.status !== "Completed");
+  const stat = (label, val, color) => `<div class="card stat-card"><div class="stat-val" style="color:${color||"var(--ink)"};">${val}</div><div class="stat-label">${label}</div></div>`;
+
+  return `
+    ${activeEmergencies.length > 0 ? `
+    <div class="card pulse" style="padding:16px;margin-bottom:18px;border-color:var(--brick);border-width:2px;background:#FBEAE8;">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;">🚨<h3 class="display" style="margin:0;font-size:17px;color:var(--brick);">Active Emergencies — respond now</h3></div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        ${activeEmergencies.map(r => `<div style="font-size:13.5px;font-weight:600;">#${r.num} · ${esc(r.description)} · 📍 ${esc(r.location)} · assigned: ${esc(r.staffName)}</div>`).join("")}
+      </div>
+    </div>` : ""}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;">
+      ${stat("Total Requests", total)}
+      ${stat("Pending", pending, "var(--amber)")}
+      ${stat("In Progress", inProgress, "var(--teal)")}
+      ${stat("Completed", completed, "var(--teal)")}
+      ${stat("Escalated", escalatedList.length, "var(--brick)")}
+      ${stat("Avg Rating", avgRating==="—" ? "—" : avgRating+"★", "var(--gold)")}
+    </div>
+    ${escalatedList.length > 0 ? `
+    <div class="card" style="padding:16px;margin-bottom:24px;border-color:var(--brick);">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;">⚠️<h3 class="display" style="margin:0;font-size:16px;color:var(--brick);">SLA Breaches</h3></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${escalatedList.map(r => `<div style="font-size:13px;">#${r.num} · ${r.department.name} · ${esc(r.location)} — exceeded target by ${Math.floor((now-r.deadlineAt)/60000)}m</div>`).join("")}
+      </div>
+    </div>` : ""}
+    <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:18px;margin-bottom:24px;">
+      <div class="card" style="padding:18px;">
+        <h3 class="display" style="font-size:16px;margin:0 0 14px;">Requests by department</h3>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${byDept.map(x => `<div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span>${x.d.icon} ${x.d.name}</span><span class="mono">${x.count}</span></div>
+            <div style="background:var(--ivory);border-radius:6px;height:8px;overflow:hidden;"><div style="width:${(x.count/maxCount)*100}%;background:var(--gold);height:100%;"></div></div>
+          </div>`).join("")}
+        </div>
+      </div>
+      <div class="card" style="padding:18px;">
+        <h3 class="display" style="font-size:16px;margin:0 0 12px;">Most requested</h3>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${mostRequested.map((x,i) => `<div style="display:flex;align-items:center;gap:10px;">
+            <span class="mono" style="font-size:11px;color:var(--muted);width:14px;">${i+1}</span>
+            <span style="flex:1;font-size:13px;">${x.d.name}</span>
+            <span class="mono" style="font-size:13px;font-weight:700;">${x.count}</span>
+          </div>`).join("")}
+        </div>
+      </div>
+    </div>
+    <div class="card" style="padding:18px;">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:12px;">👥<h3 class="display" style="margin:0;font-size:16px;">Staff workload</h3></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${S.staff.map(s => { const d = DEPARTMENTS.find(x => x.id === s.dept); return `
+          <div style="display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap;">
+            <span style="width:110px;">${esc(s.name)}</span>
+            <span class="badge" style="color:var(--ink);background:var(--ivory);">${d.icon} ${d.name}</span>
+            <span style="flex:1;"></span>
+            <span class="badge" style="color:${s.available ? "var(--teal)" : "var(--muted)"};background:${s.available ? "#E4EFE9" : "var(--ivory)"};">${s.available ? "Available" : "Busy"}</span>
+            <span class="mono" style="font-size:12px;color:var(--muted);width:70px;text-align:right;">${s.active} active</span>
+          </div>`; }).join("")}
+      </div>
+    </div>`;
+}
+function supervisorTaskBoardHTML(){
+  const open = S.requests.filter(r => r.status !== "Completed").sort((a,b) => (b.emergency - a.emergency) || (a.deadlineAt - b.deadlineAt));
+  if (open.length === 0) return `<div class="card" style="padding:16px;color:var(--muted);font-size:13px;">No open requests right now.</div>`;
+  const rows = open.map(r => {
+    const pr = PRIORITY_STYLE[r.priority];
+    const options = S.staff.map(s => {
+      const d = DEPARTMENTS.find(x => x.id === s.dept);
+      const isCross = s.dept !== r.department.id;
+      return `<option value="${s.id}" ${s.id === r.staffId ? "selected" : ""}>${esc(s.name)} — ${d.name}${isCross ? " (other dept)" : ""}${s.available ? "" : " · busy"}</option>`;
+    }).join("");
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;">
+      <span class="mono" style="font-size:11px;color:var(--muted);width:32px;">#${r.num}</span>
+      <span class="badge" style="color:var(--ink);background:var(--ivory);">${r.department.icon} ${r.department.name}</span>
+      <span class="badge" style="color:#fff;background:${pr.color};">${pr.label}</span>
+      <span style="flex:1;min-width:160px;font-size:13px;">${esc(r.description.slice(0,54))}${r.description.length > 54 ? "…" : ""}</span>
+      <span style="font-size:11.5px;color:var(--muted);">${esc(r.status)}</span>
+      <select class="sel-field" style="width:auto;font-size:12px;padding:6px 8px;" onchange="reassignRequest('${r.id}', this.value)">${options}</select>
+    </div>`;
+  }).join("");
+  return `<div class="card" style="padding:16px 16px 4px;">${rows}</div>`;
+}
+function renderSupervisorDashboard(){
+  return `<div style="max-width:980px;margin:0 auto;padding:26px 18px 60px;">
+    <h2 class="display" style="font-size:26px;margin:0 0 18px;">Operations Overview</h2>
+    <div id="supStats">${supervisorStatsHTML()}</div>
+    <h3 class="display" style="font-size:18px;margin:24px 0 12px;">🔁 Reassign a task</h3>
+    <p style="font-size:12.5px;color:var(--muted);margin:-8px 0 12px;">Move any open request to a different staff member — including someone outside its usual department if they're free.</p>
+    <div id="supTasks">${supervisorTaskBoardHTML()}</div>
+  </div>`;
+}
+
+/* ============================= MODALS ============================= */
+function modalWrap(title, iconEmoji, inner, closeFn){
+  return `<div class="modal-overlay" onclick="${closeFn}()">
+    <div class="card modal-box rise" onclick="event.stopPropagation()">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+        <span>${iconEmoji}</span><h3 class="display" style="margin:0;font-size:19px;">${title}</h3>
+      </div>
+      ${inner}
+    </div>
+  </div>`;
+}
+function emergencyModalHTML(){
+  const rows = EMERGENCY.map(c => `
+    <a href="tel:${c.number}" class="btn" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:10px;background:var(--ivory);border:1px solid var(--line);">
+      <div><div style="font-weight:600;font-size:14px;">${c.label}</div><div style="font-size:11px;color:var(--muted);">${c.tag}</div></div>
+      <span style="display:flex;align-items:center;gap:6px;background:var(--brick);color:#fff;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:700;">📞 ${c.number}</span>
+    </a>`).join("");
+  return modalWrap("Emergency", "🚨", `<div style="display:flex;flex-direction:column;gap:8px;">${rows}</div>`, "closeEmergency");
+}
+function wifiModalHTML(){
+  const loc = S.ui.wifiLocation || "Room";
+  const net = WIFI[loc] || WIFI.Other;
+  const inner = `
+    <div style="background:var(--ink);border-radius:12px;padding:18px;">
+      <div style="color:var(--goldSoft);font-size:12px;margin-bottom:4px;">NETWORK</div>
+      <div class="mono" style="color:#fff;font-size:16px;margin-bottom:14px;">${esc(net.ssid)}</div>
+      <div style="color:var(--goldSoft);font-size:12px;margin-bottom:4px;">PASSWORD</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <span class="mono" style="color:#fff;font-size:16px;">${esc(net.pass)}</span>
+        <button id="wifiCopyBtn" class="btn" onclick="copyWifi('${net.pass}')" style="background:var(--gold);color:var(--ink);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;">Copy</button>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin-top:12px;">Signal shown for your current area. Change your request location to see a different network.</p>`;
+  return modalWrap(`WiFi — ${loc}`, "📶", inner, "closeWifi");
+}
+function chatMessageHTML(m){
+  const isBot = m.from === "bot";
+  return `<div style="display:flex;justify-content:${isBot ? "flex-start" : "flex-end"};margin-bottom:8px;">
+    <div style="max-width:82%;padding:9px 12px;border-radius:12px;font-size:13px;line-height:1.45;
+      background:${isBot ? "var(--ivory)" : "var(--ink)"};color:${isBot ? "var(--text)" : "#fff"};">${m.html ? m.html : esc(m.text)}</div>
+  </div>`;
+}
+function chatModalHTML(){
+  const msgs = (S.ui.chatMessages || []).map(chatMessageHTML).join("");
+  const inner = `
+    <div id="chatBody" style="max-height:280px;overflow-y:auto;padding-right:4px;margin-bottom:12px;">${msgs}</div>
+    <div style="display:flex;gap:8px;">
+      <input id="chatInput" class="sel-field" placeholder="Type a message…" style="flex:1;" onkeydown="if(event.key==='Enter'){sendChatMessage();}" />
+      <button class="btn" onclick="sendChatMessage()" style="background:var(--gold);color:var(--ink);padding:0 16px;border-radius:10px;font-weight:700;">Send</button>
+    </div>`;
+  return modalWrap("LUXORA Assistant", "🤖", inner, "closeChat");
+}
+function feedbackModalHTML(){
+  const r = S.requests.find(x => x.id === S.ui.feedbackReqId); if (!r) return "";
+  const stars = S.ui.feedbackStars || 5;
+  const starsHTML = [1,2,3,4,5].map(n => `<span onclick="setStars(${n})" style="cursor:pointer;font-size:26px;color:var(--gold);">${n<=stars ? "★" : "☆"}</span>`).join("");
+  const inner = `
+    <p style="font-size:13px;color:var(--muted);margin-top:-6px;">${r.department.name} · Request #${r.num}</p>
+    <div style="display:flex;gap:6px;margin:10px 0 14px;">${starsHTML}</div>
+    <textarea class="desc-field" id="fbComment" rows="3" placeholder="Optional comment…"></textarea>
+    <button class="btn" onclick="submitFeedback()" style="margin-top:12px;width:100%;background:var(--ink);color:#fff;padding:10px 0;border-radius:10px;font-weight:700;">Submit Feedback</button>`;
+  return modalWrap("Rate this service", "⭐", inner, "closeFeedback");
+}
+
+/* ============================= SHELL ============================= */
+function renderShell(){
+  const u = S.currentUser;
+  const showWifiBtn = u.role === "guest";
+  return `
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="display" style="font-size:20px;color:var(--goldSoft);">LUXORA</span>
+        <span style="font-size:11px;color:rgba(255,255,255,.4);border-left:1px solid rgba(255,255,255,.2);padding-left:10px;text-transform:capitalize;">${u.role} view</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        ${showWifiBtn ? `<button class="btn iconbtn" onclick="openWifi()">📶 WiFi</button>` : ""}
+        <button class="btn iconbtn" onclick="openEmergency()" style="color:var(--brick);">🚨 Emergency</button>
+        <div style="width:1px;height:22px;background:rgba(255,255,255,.15);margin:0 4px;"></div>
+        <span style="font-size:13px;color:rgba(255,255,255,.75);">${esc(u.name)}</span>
+        <button class="btn iconbtn" onclick="logout()">⎋</button>
+      </div>
+    </div>
+    ${u.role === "guest" ? renderGuestPortal() : u.role === "staff" ? renderStaffDashboard() : renderSupervisorDashboard()}
+    ${u.role === "guest" ? `<button class="btn" onclick="openChat()" title="Ask LUXORA" style="position:fixed;bottom:22px;right:22px;width:56px;height:56px;border-radius:50%;background:var(--ink);color:var(--goldSoft);font-size:23px;box-shadow:0 6px 18px rgba(16,34,43,.35);z-index:40;">🤖</button>` : ""}
+    ${S.ui.showEmergency ? emergencyModalHTML() : ""}
+    ${S.ui.showWifi ? wifiModalHTML() : ""}
+    ${S.ui.feedbackReqId ? feedbackModalHTML() : ""}
+    ${S.ui.showChat ? chatModalHTML() : ""}
+    ${S.ui.toast ? `<div class="toast rise" id="toastBox">${esc(S.ui.toast)}</div>` : ""}
+  `;
+}
+
+/* ============================= ROOT RENDER + TICK ============================= */
+function render(){
+  document.getElementById("app").innerHTML = S.currentUser ? renderShell() : renderLogin();
+}
+function tick(){
+  if (!S.currentUser) return;
+  document.querySelectorAll('[id^="dyn-"]').forEach(el => {
+    const id = el.id.slice(4);
+    const r = S.requests.find(x => x.id === id);
+    if (r) el.outerHTML = requestCardHTML(r, { guestView: S.currentUser.role !== "staff" });
+  });
+  const supBox = document.getElementById("supStats");
+  if (supBox) supBox.innerHTML = supervisorStatsHTML();
+}
+setInterval(tick, 1000);
+render();
+</script>
+</body>
+</html>
