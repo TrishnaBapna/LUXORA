@@ -123,6 +123,16 @@ const MENU = [
   { id:"f11", name:"Chocolate Brownie", category:"Desserts", price:200, desc:"Served warm, vanilla ice cream." },
   { id:"f12", name:"Ice Cream (2 scoops)", category:"Desserts", price:180, desc:"Ask for today's flavours." },
 ];
+const SERVICES = [
+  { id:"s1", name:"Babysitting (per hour)", category:"Family Care", price:500, desc:"Certified in-house childcare, billed hourly.", dept:"concierge" },
+  { id:"s2", name:"Car Rental (per day)", category:"Transport", price:2500, desc:"Self-drive sedan rental, per day.", dept:"concierge" },
+  { id:"s3", name:"Airport Pickup", category:"Transport", price:1200, desc:"One-way private transfer to/from the airport.", dept:"transportation" },
+  { id:"s4", name:"Valet Parking (per day)", category:"Transport", price:300, desc:"Full-day valet parking for your vehicle.", dept:"concierge" },
+  { id:"s5", name:"Spa Massage (60 min)", category:"Wellness", price:1800, desc:"Full-body relaxation massage.", dept:"amenities" },
+  { id:"s6", name:"Spa Facial (45 min)", category:"Wellness", price:1500, desc:"Rejuvenating facial treatment.", dept:"amenities" },
+  { id:"s7", name:"Private Pool Cabana (per day)", category:"Wellness", price:2000, desc:"Reserved poolside cabana for the day.", dept:"amenities" },
+  { id:"s8", name:"Late Checkout (per hour)", category:"Room", price:400, desc:"Extend your checkout time.", dept:"housekeeping" },
+];
 const CLASSIFY_RULES = [
   { dept:"maintenance", words:["ac","air condition","light","bulb","leak","plumbing","tv","electrical","shower","tap","not working","broken","fix","power","socket"] },
   { dept:"housekeeping", words:["clean","towel","sheets","trash","tidy","vacuum","housekeeping","bin","dust"] },
@@ -176,15 +186,19 @@ let S = {
   staff: INITIAL_STAFF.map(s => ({...s})),
   requests: [],
   reqCounter: 1,
+  serviceTally: {},
   currentUser: null,
   ui: {
     authRole:"guest", authMode:"login", authError:"",
     guestTab:"help", locMode:"room", area:"Garden",
     pendingIndex:null, customMode:false,
     showEmergency:false, showWifi:false, wifiLocation:"Room",
-    feedbackReqId:null, cart:{}, toast:null,
+    feedbackReqId:null, cart:{}, serviceCart:{}, staffSort:"rating_desc", toast:null,
   },
 };
+function bumpTally(label, amount){
+  S.serviceTally[label] = (S.serviceTally[label] || 0) + (amount || 1);
+}
 
 function esc(str){
   return String(str).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -269,6 +283,7 @@ function submitRequestForm(){
     reason = "Selected directly by guest."; emergency = !!q.emergency;
   } else return;
   createRequest(text, currentLocation(), department, priority, reason, emergency);
+  bumpTally(S.ui.customMode ? department.name + " (custom request)" : QUICK_REQUESTS[S.ui.pendingIndex]?.label || text, 1);
   S.ui.pendingIndex = null; S.ui.customMode = false;
   if (emergency){
     showToast("🚨 Emergency alert sent — also call for help directly, now");
@@ -293,8 +308,35 @@ function placeFoodOrder(){
   const summary = items.map(c => `${c.qty}x ${c.item.name}`).join(", ");
   const desc = `Room service order: ${summary}${note ? " — Note: " + note : ""} (Total ₹${cartTotal()})`;
   createRequest(desc, `Room ${S.currentUser.room}`, DEPARTMENTS.find(d => d.id === "roomservice"), "Normal", "Food order placed via menu.");
+  items.forEach(c => bumpTally(c.item.name, c.qty));
   S.ui.cart = {};
   showToast("Order placed to Room " + S.currentUser.room + "!");
+}
+
+function changeServiceQty(id, delta){
+  S.ui.serviceCart[id] = Math.max(0, (S.ui.serviceCart[id] || 0) + delta);
+  if (S.ui.serviceCart[id] === 0) delete S.ui.serviceCart[id];
+  render();
+}
+function serviceCartItems(){
+  return Object.entries(S.ui.serviceCart).map(([id, qty]) => ({ item: SERVICES.find(m => m.id === id), qty }));
+}
+function serviceCartTotal(){ return serviceCartItems().reduce((s,c) => s + c.item.price * c.qty, 0); }
+function placeServiceOrder(){
+  const items = serviceCartItems();
+  if (items.length === 0) return;
+  const groups = {};
+  items.forEach(c => { (groups[c.item.dept] = groups[c.item.dept] || []).push(c); });
+  Object.entries(groups).forEach(([deptId, list]) => {
+    const subtotal = list.reduce((s,c) => s + c.item.price * c.qty, 0);
+    const summary = list.map(c => `${c.qty}x ${c.item.name}`).join(", ");
+    const desc = `Extra services booked: ${summary} (₹${subtotal}) — charge to Room ${S.currentUser.room}`;
+    createRequest(desc, currentLocation(), DEPARTMENTS.find(d => d.id === deptId), "Normal", "Paid service booked by guest.");
+  });
+  items.forEach(c => bumpTally(c.item.name, c.qty));
+  const grandTotal = serviceCartTotal();
+  S.ui.serviceCart = {};
+  showToast(`Services booked — ₹${grandTotal} to Room ${S.currentUser.room}`);
 }
 
 function createRequest(description, location, department, priority, reason, emergency){
@@ -567,6 +609,44 @@ function renderGuestPortal(){
 
   const foodTab = `<div style="margin-bottom:26px;">${foodItems}${cartBox}</div>`;
 
+  const serviceCats = [...new Set(SERVICES.map(s => s.category))];
+  const serviceItems = serviceCats.map(cat => `
+    <div style="margin-bottom:18px;">
+      <h4 class="display" style="font-size:15px;margin:0 0 8px;color:var(--muted);">${esc(cat)}</h4>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${SERVICES.filter(m => m.category===cat).map(m => `
+          <div class="card food-row">
+            <div style="flex:1;">
+              <div style="font-weight:700;font-size:14px;">${esc(m.name)}</div>
+              <div style="font-size:12px;color:var(--muted);">${esc(m.desc)}</div>
+              <div class="mono" style="font-size:12.5px;color:var(--gold);margin-top:3px;font-weight:700;">₹${m.price}</div>
+            </div>
+            ${!S.ui.serviceCart[m.id] ? `<button class="btn" onclick="changeServiceQty('${m.id}',1)" style="background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;font-size:12.5px;font-weight:700;">Add</button>` :
+            `<div style="display:flex;align-items:center;gap:8px;">
+              <button class="btn qty-btn" onclick="changeServiceQty('${m.id}',-1)" style="background:var(--ivory);border:1px solid var(--line);">−</button>
+              <span class="mono" style="font-size:13px;width:14px;text-align:center;">${S.ui.serviceCart[m.id]}</span>
+              <button class="btn qty-btn" onclick="changeServiceQty('${m.id}',1)" style="background:var(--ink);color:#fff;">+</button>
+            </div>`}
+          </div>`).join("")}
+      </div>
+    </div>`).join("");
+
+  const si = serviceCartItems();
+  const serviceCartBox = si.length > 0 ? `
+    <div class="card rise" style="padding:16px;position:sticky;bottom:12px;border-color:var(--gold);">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px;">Your services</div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;">
+        ${si.map(c => `<div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);"><span>${c.qty}× ${esc(c.item.name)}</span><span class="mono">₹${c.item.price*c.qty}</span></div>`).join("")}
+      </div>
+      <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;margin-bottom:12px;border-top:1px dashed var(--line);padding-top:8px;">
+        <span>Total (Room ${esc(u.room)})</span><span class="mono">₹${serviceCartTotal()}</span>
+      </div>
+      <button class="btn" onclick="placeServiceOrder()" style="width:100%;background:var(--gold);color:var(--ink);padding:11px 0;border-radius:10px;font-weight:700;font-size:14px;">Book & Charge to Room ${esc(u.room)}</button>
+      <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">These are paid add-ons — the charge goes on your room bill, separate from complimentary requests.</p>
+    </div>` : "";
+
+  const servicesTab = `<div style="margin-bottom:26px;">${serviceItems}${serviceCartBox}</div>`;
+
   return `
   <div style="max-width:820px;margin:0 auto;padding:26px 18px 60px;">
     <button class="btn" onclick="openEmergency()" style="width:100%;text-align:left;display:flex;align-items:center;gap:8px;background:var(--ink);color:#fff;padding:9px 14px;border-radius:10px;font-size:12.5px;margin-bottom:18px;">
@@ -587,8 +667,10 @@ function renderGuestPortal(){
         background:${S.ui.guestTab==="help" ? "var(--ink)" : "transparent"};color:${S.ui.guestTab==="help" ? "#fff" : "var(--ink)"};">🛎️ Request Help</button>
       <button class="btn" onclick="setGuestTab('food')" style="flex:1;padding:9px 0;border-radius:9px;font-size:13px;font-weight:700;
         background:${S.ui.guestTab==="food" ? "var(--ink)" : "transparent"};color:${S.ui.guestTab==="food" ? "#fff" : "var(--ink)"};">🍽️ Order Food ${ci.length ? `<span style="background:var(--gold);color:var(--ink);border-radius:999px;font-size:10px;padding:1px 6px;margin-left:4px;">${ci.reduce((s,c)=>s+c.qty,0)}</span>` : ""}</button>
+      <button class="btn" onclick="setGuestTab('services')" style="flex:1;padding:9px 0;border-radius:9px;font-size:13px;font-weight:700;
+        background:${S.ui.guestTab==="services" ? "var(--ink)" : "transparent"};color:${S.ui.guestTab==="services" ? "#fff" : "var(--ink)"};">💼 Extra Services ${si.length ? `<span style="background:var(--gold);color:var(--ink);border-radius:999px;font-size:10px;padding:1px 6px;margin-left:4px;">${si.reduce((s,c)=>s+c.qty,0)}</span>` : ""}</button>
     </div>
-    ${S.ui.guestTab === "help" ? helpTab : foodTab}
+    ${S.ui.guestTab === "help" ? helpTab : S.ui.guestTab === "food" ? foodTab : servicesTab}
     <h3 class="display" style="font-size:17px;margin-bottom:10px;">Active requests</h3>
     ${active.length === 0 ? `<p style="color:var(--muted);font-size:13px;">Nothing active — submit a request above.</p>` : ""}
     <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:26px;">
@@ -636,7 +718,14 @@ function renderStaffDashboard(){
 }
 
 /* ============================= RENDER: SUPERVISOR ============================= */
-function supervisorStatsHTML(){
+function barRows(data, color){
+  const max = Math.max(1, ...data.map(x => x.count));
+  return data.map(x => `<div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span>${esc(x.label)}</span><span class="mono">${x.count}</span></div>
+    <div style="background:var(--ivory);border-radius:6px;height:8px;overflow:hidden;"><div style="width:${(x.count/max)*100}%;background:${color};height:100%;"></div></div>
+  </div>`).join("");
+}
+function supervisorLiveHTML(){
   const now = Date.now();
   const total = S.requests.length;
   const pending = S.requests.filter(r => r.status === "Assigned").length;
@@ -645,11 +734,6 @@ function supervisorStatsHTML(){
   const escalatedList = S.requests.filter(r => r.status !== "Completed" && now > r.deadlineAt);
   const rated = S.requests.filter(r => r.rating);
   const avgRating = rated.length ? (rated.reduce((s,r) => s+r.rating,0)/rated.length).toFixed(1) : "—";
-
-  const byDept = DEPARTMENTS.map(d => ({ d, count: S.requests.filter(r => r.department.id === d.id).length }));
-  const maxCount = Math.max(1, ...byDept.map(x => x.count));
-  const mostRequested = [...byDept].sort((a,b) => b.count - a.count).slice(0,4);
-
   const activeEmergencies = S.requests.filter(r => r.emergency && r.status !== "Completed");
   const stat = (label, val, color) => `<div class="card stat-card"><div class="stat-val" style="color:${color||"var(--ink)"};">${val}</div><div class="stat-label">${label}</div></div>`;
 
@@ -670,44 +754,96 @@ function supervisorStatsHTML(){
       ${stat("Avg Rating", avgRating==="—" ? "—" : avgRating+"★", "var(--gold)")}
     </div>
     ${escalatedList.length > 0 ? `
-    <div class="card" style="padding:16px;margin-bottom:24px;border-color:var(--brick);">
+    <div class="card" style="padding:16px;margin-bottom:0;border-color:var(--brick);">
       <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;">⚠️<h3 class="display" style="margin:0;font-size:16px;color:var(--brick);">SLA Breaches</h3></div>
       <div style="display:flex;flex-direction:column;gap:8px;">
         ${escalatedList.map(r => `<div style="font-size:13px;">#${r.num} · ${r.department.name} · ${esc(r.location)} — exceeded target by ${Math.floor((now-r.deadlineAt)/60000)}m</div>`).join("")}
       </div>
-    </div>` : ""}
+    </div>` : ""}`;
+}
+function setStaffSort(val){ S.ui.staffSort = val; render(); }
+function staffRatingRows(){
+  const sort = S.ui.staffSort || "rating_desc";
+  const list = S.staff.map(s => {
+    const rated = S.requests.filter(r => r.staffId === s.id && r.rating);
+    const avg = rated.length ? rated.reduce((sum,r) => sum + r.rating, 0) / rated.length : null;
+    return { s, avg, count: rated.length };
+  });
+  list.sort((a,b) => {
+    if (a.avg === null && b.avg === null) return 0;
+    if (a.avg === null) return 1;
+    if (b.avg === null) return -1;
+    return sort === "rating_desc" ? b.avg - a.avg : a.avg - b.avg;
+  });
+  return list.map(({ s, avg, count }) => {
+    const d = DEPARTMENTS.find(x => x.id === s.dept);
+    const label = avg !== null ? avg.toFixed(1) + "★" : "—";
+    const color = avg === null ? "var(--muted)" : avg >= 4 ? "var(--teal)" : avg >= 3 ? "var(--amber)" : "var(--brick)";
+    return `<div style="display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap;">
+      <span style="width:110px;">${esc(s.name)}</span>
+      <span class="badge" style="color:var(--ink);background:var(--ivory);">${d.icon} ${d.name}</span>
+      <span style="flex:1;"></span>
+      <span class="mono" style="font-weight:700;color:${color};">${label}</span>
+      <span style="font-size:11px;color:var(--muted);width:78px;text-align:right;">${count} rating${count !== 1 ? "s" : ""}</span>
+    </div>`;
+  }).join("");
+}
+function supervisorAnalyticsHTML(){
+  const byDept = DEPARTMENTS.map(d => ({ label: `${d.icon} ${d.name}`, count: S.requests.filter(r => r.department.id === d.id).length }));
+  const servicesData = Object.entries(S.serviceTally).map(([label,count]) => ({ label, count })).sort((a,b) => b.count - a.count).slice(0,6);
+  const roomCounts = {};
+  S.requests.forEach(r => { roomCounts[r.location] = (roomCounts[r.location] || 0) + 1; });
+  const roomsData = Object.entries(roomCounts).map(([label,count]) => ({ label, count })).sort((a,b) => b.count - a.count).slice(0,6);
+  const perfData = S.staff.map(s => ({ label: s.name, count: S.requests.filter(r => r.staffId === s.id && r.status === "Completed").length })).sort((a,b) => b.count - a.count);
+  const sort = S.ui.staffSort || "rating_desc";
+
+  return `
     <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:18px;margin-bottom:24px;">
       <div class="card" style="padding:18px;">
         <h3 class="display" style="font-size:16px;margin:0 0 14px;">Requests by department</h3>
-        <div style="display:flex;flex-direction:column;gap:10px;">
-          ${byDept.map(x => `<div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span>${x.d.icon} ${x.d.name}</span><span class="mono">${x.count}</span></div>
-            <div style="background:var(--ivory);border-radius:6px;height:8px;overflow:hidden;"><div style="width:${(x.count/maxCount)*100}%;background:var(--gold);height:100%;"></div></div>
-          </div>`).join("")}
+        <div style="display:flex;flex-direction:column;gap:10px;">${barRows(byDept, "var(--gold)")}</div>
+      </div>
+      <div class="card" style="padding:18px;">
+        <h3 class="display" style="font-size:16px;margin:0 0 14px;">Most requested services</h3>
+        ${servicesData.length ? `<div style="display:flex;flex-direction:column;gap:10px;">${barRows(servicesData, "var(--teal)")}</div>` :
+          `<p style="color:var(--muted);font-size:12.5px;">No requests yet — this fills in as guests submit requests, order food, or book services.</p>`}
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:24px;">
+      <div class="card" style="padding:18px;">
+        <h3 class="display" style="font-size:16px;margin:0 0 4px;">Rooms &amp; areas with most requests</h3>
+        <p style="font-size:11.5px;color:var(--muted);margin:0 0 12px;">Spotting rooms that generate unusually many requests</p>
+        ${roomsData.length ? `<div style="display:flex;flex-direction:column;gap:10px;">${barRows(roomsData, "var(--brick)")}</div>` :
+          `<p style="color:var(--muted);font-size:12.5px;">No requests yet.</p>`}
+      </div>
+      <div class="card" style="padding:18px;">
+        <h3 class="display" style="font-size:16px;margin:0 0 14px;">Staff performance — completed tasks</h3>
+        <div style="display:flex;flex-direction:column;gap:10px;">${barRows(perfData, "var(--gold)")}</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+      <div class="card" style="padding:18px;">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:12px;">👥<h3 class="display" style="margin:0;font-size:16px;">Staff workload</h3></div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${S.staff.map(s => { const d = DEPARTMENTS.find(x => x.id === s.dept); return `
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap;">
+              <span style="width:110px;">${esc(s.name)}</span>
+              <span class="badge" style="color:var(--ink);background:var(--ivory);">${d.icon} ${d.name}</span>
+              <span style="flex:1;"></span>
+              <span class="badge" style="color:${s.available ? "var(--teal)" : "var(--muted)"};background:${s.available ? "#E4EFE9" : "var(--ivory)"};">${s.available ? "Available" : "Busy"}</span>
+              <span class="mono" style="font-size:12px;color:var(--muted);width:70px;text-align:right;">${s.active} active</span>
+            </div>`; }).join("")}
         </div>
       </div>
       <div class="card" style="padding:18px;">
-        <h3 class="display" style="font-size:16px;margin:0 0 12px;">Most requested</h3>
-        <div style="display:flex;flex-direction:column;gap:10px;">
-          ${mostRequested.map((x,i) => `<div style="display:flex;align-items:center;gap:10px;">
-            <span class="mono" style="font-size:11px;color:var(--muted);width:14px;">${i+1}</span>
-            <span style="flex:1;font-size:13px;">${x.d.name}</span>
-            <span class="mono" style="font-size:13px;font-weight:700;">${x.count}</span>
-          </div>`).join("")}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:7px;">⭐<h3 class="display" style="margin:0;font-size:16px;">Staff ratings</h3></div>
+          <select class="sel-field" style="width:auto;font-size:12px;padding:6px 8px;" onchange="setStaffSort(this.value)">
+            <option value="rating_desc" ${sort==="rating_desc" ? "selected" : ""}>Highest rating first</option>
+            <option value="rating_asc" ${sort==="rating_asc" ? "selected" : ""}>Lowest rating first</option>
+          </select>
         </div>
-      </div>
-    </div>
-    <div class="card" style="padding:18px;">
-      <div style="display:flex;align-items:center;gap:7px;margin-bottom:12px;">👥<h3 class="display" style="margin:0;font-size:16px;">Staff workload</h3></div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        ${S.staff.map(s => { const d = DEPARTMENTS.find(x => x.id === s.dept); return `
-          <div style="display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap;">
-            <span style="width:110px;">${esc(s.name)}</span>
-            <span class="badge" style="color:var(--ink);background:var(--ivory);">${d.icon} ${d.name}</span>
-            <span style="flex:1;"></span>
-            <span class="badge" style="color:${s.available ? "var(--teal)" : "var(--muted)"};background:${s.available ? "#E4EFE9" : "var(--ivory)"};">${s.available ? "Available" : "Busy"}</span>
-            <span class="mono" style="font-size:12px;color:var(--muted);width:70px;text-align:right;">${s.active} active</span>
-          </div>`; }).join("")}
+        <div style="display:flex;flex-direction:column;gap:8px;">${staffRatingRows()}</div>
       </div>
     </div>`;
 }
@@ -735,7 +871,8 @@ function supervisorTaskBoardHTML(){
 function renderSupervisorDashboard(){
   return `<div style="max-width:980px;margin:0 auto;padding:26px 18px 60px;">
     <h2 class="display" style="font-size:26px;margin:0 0 18px;">Operations Overview</h2>
-    <div id="supStats">${supervisorStatsHTML()}</div>
+    <div id="supLive">${supervisorLiveHTML()}</div>
+    <div id="supAnalytics" style="margin-top:24px;">${supervisorAnalyticsHTML()}</div>
     <h3 class="display" style="font-size:18px;margin:24px 0 12px;">🔁 Reassign a task</h3>
     <p style="font-size:12.5px;color:var(--muted);margin:-8px 0 12px;">Move any open request to a different staff member — including someone outside its usual department if they're free.</p>
     <div id="supTasks">${supervisorTaskBoardHTML()}</div>
@@ -845,8 +982,8 @@ function tick(){
     const r = S.requests.find(x => x.id === id);
     if (r) el.outerHTML = requestCardHTML(r, { guestView: S.currentUser.role !== "staff" });
   });
-  const supBox = document.getElementById("supStats");
-  if (supBox) supBox.innerHTML = supervisorStatsHTML();
+  const supBox = document.getElementById("supLive");
+  if (supBox) supBox.innerHTML = supervisorLiveHTML();
 }
 setInterval(tick, 1000);
 render();
